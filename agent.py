@@ -18,12 +18,15 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
+import re
+
 from tools import search_listings, suggest_outfit, create_fit_card
+from utils.data_loader import get_example_wardrobe
 
 
 # ── session state ─────────────────────────────────────────────────────────────
 
-def _new_session(query: str, wardrobe: dict) -> dict:
+def _new_session(query: str, wardrobe: dict | None = None) -> dict:
     """
     Initialize and return a fresh session dict for one user interaction.
 
@@ -34,20 +37,106 @@ def _new_session(query: str, wardrobe: dict) -> dict:
     You may add fields to this dict as needed for your implementation.
     """
     return {
-        "query": query,              # original user query
+        "query": query,              # original user query, kept for starter compatibility
+        "user_query": query,         # original user query used by the Milestone 4 state flow
         "parsed": {},                # extracted description / size / max_price
+        "description": None,         # parsed item description
+        "size": None,                # parsed requested size
+        "max_price": None,           # parsed price ceiling
         "search_results": [],        # list of matching listing dicts
         "selected_item": None,       # top result, passed into suggest_outfit
         "wardrobe": wardrobe,        # user's wardrobe dict
         "outfit_suggestion": None,   # string returned by suggest_outfit
         "fit_card": None,            # string returned by create_fit_card
         "error": None,               # set if the interaction ended early
+        "error_message": None,       # user-facing error, kept in sync with error
+        "completed_steps": [],       # tool steps completed by the planning loop
     }
+
+
+def _parse_query(query: str) -> dict:
+    """Extract the simple search fields needed by search_listings()."""
+    text = (query or "").strip()
+    lower_text = text.lower()
+
+    max_price = None
+    price_match = re.search(
+        r"\b(?:under|below|max(?:imum)?|up to|less than)\s*\$?\s*(\d+(?:\.\d+)?)",
+        lower_text,
+    )
+    if not price_match:
+        price_match = re.search(r"\$(\d+(?:\.\d+)?)", lower_text)
+    if price_match:
+        max_price = float(price_match.group(1))
+
+    size = None
+    size_match = re.search(
+        r"\b(?:in\s+)?size\s+"
+        r"(xxs|xs|s|m|l|xl|xxl|extra\s+small|small|medium|large|extra\s+large|"
+        r"us\s*\d+(?:\.\d+)?|w\d+(?:\s*l\d+)?)\b",
+        lower_text,
+    )
+    if not size_match:
+        size_match = re.search(r"\b(us\s*\d+(?:\.\d+)?|w\d+(?:\s*l\d+)?)\b", lower_text)
+    if size_match:
+        raw_size = re.sub(r"\s+", " ", size_match.group(1).strip())
+        size_map = {
+            "extra small": "XS",
+            "small": "S",
+            "medium": "M",
+            "large": "L",
+            "extra large": "XL",
+        }
+        size = size_map.get(raw_size, raw_size.upper())
+
+    description = text
+    description = re.split(
+        r"\b(?:i mostly wear|what's out there|what is out there|how would i style|"
+        r"how can i style|how would you style|style it)\b",
+        description,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    description = re.sub(
+        r"\b(?:under|below|max(?:imum)?|up to|less than)\s*\$?\s*\d+(?:\.\d+)?",
+        " ",
+        description,
+        flags=re.IGNORECASE,
+    )
+    description = re.sub(r"\$\d+(?:\.\d+)?", " ", description)
+    description = re.sub(
+        r"\b(?:in\s+)?size\s+"
+        r"(?:xxs|xs|s|m|l|xl|xxl|extra\s+small|small|medium|large|extra\s+large|"
+        r"us\s*\d+(?:\.\d+)?|w\d+(?:\s*l\d+)?)\b",
+        " ",
+        description,
+        flags=re.IGNORECASE,
+    )
+    description = re.sub(
+        r"\b(?:i'?m|i am|looking for|searching for|trying to find|find me|"
+        r"need|want|a|an|some|please)\b",
+        " ",
+        description,
+        flags=re.IGNORECASE,
+    )
+    description = re.sub(r"[^\w\s/-]", " ", description)
+    description = re.sub(r"\s+", " ", description).strip()
+
+    return {
+        "description": description,
+        "size": size,
+        "max_price": max_price,
+    }
+
+
+def _set_error(session: dict, message: str) -> None:
+    session["error"] = message
+    session["error_message"] = message
 
 
 # ── planning loop ─────────────────────────────────────────────────────────────
 
-def run_agent(query: str, wardrobe: dict) -> dict:
+def run_agent(session: dict | str | None = None, wardrobe: dict | None = None, query: str | None = None) -> dict:
     """
     Main agent entry point. Runs the FitFindr planning loop for a single
     user interaction and returns the completed session dict.
@@ -92,10 +181,85 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
-    session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
-    return session
+    if isinstance(session, dict):
+        session_state = session
+        user_query = session_state.get("user_query") or session_state.get("query") or ""
+    else:
+        user_query = query if query is not None else (session or "")
+        session_state = _new_session(str(user_query), wardrobe)
+
+    session_state.setdefault("query", user_query)
+    session_state.setdefault("user_query", user_query)
+    session_state.setdefault("parsed", {})
+    session_state["search_results"] = []
+    session_state["selected_item"] = None
+    session_state["outfit_suggestion"] = None
+    session_state["fit_card"] = None
+    session_state["completed_steps"] = []
+    session_state["error"] = None
+    session_state["error_message"] = None
+
+    parsed = _parse_query(str(user_query))
+    explicit_fields = {
+        "description": session_state.get("description"),
+        "size": session_state.get("size"),
+        "max_price": session_state.get("max_price"),
+    }
+    parsed.update({key: value for key, value in explicit_fields.items() if value not in (None, "")})
+
+    session_state["parsed"] = parsed
+    session_state["description"] = parsed.get("description")
+    session_state["size"] = parsed.get("size")
+    session_state["max_price"] = parsed.get("max_price")
+
+    if not session_state.get("description"):
+        _set_error(session_state, "Tell me what kind of secondhand item you want to find.")
+        return session_state
+
+    if not session_state.get("wardrobe"):
+        session_state["wardrobe"] = get_example_wardrobe()
+
+    results = search_listings(
+        session_state["description"],
+        session_state.get("size"),
+        session_state.get("max_price"),
+    )
+    session_state["search_results"] = results
+    session_state["completed_steps"].append("search_listings")
+
+    if not results:
+        session_state["selected_item"] = None
+        session_state["outfit_suggestion"] = None
+        session_state["fit_card"] = None
+        _set_error(
+            session_state,
+            "No listings matched that request. Try a broader item description, a different size, or a higher max price.",
+        )
+        print(f"completed_steps: {session_state['completed_steps']}")
+        return session_state
+
+    selected_item = results[0]
+    session_state["selected_item"] = selected_item
+    print(f"selected_item: {selected_item}")
+
+    outfit_suggestion = suggest_outfit(selected_item, session_state["wardrobe"])
+    session_state["outfit_suggestion"] = outfit_suggestion
+    session_state["completed_steps"].append("suggest_outfit")
+    print(f"outfit_suggestion: {outfit_suggestion}")
+
+    if not isinstance(outfit_suggestion, str) or not outfit_suggestion.strip():
+        session_state["fit_card"] = None
+        _set_error(session_state, "I found a listing, but could not create an outfit suggestion for it.")
+        print(f"completed_steps: {session_state['completed_steps']}")
+        return session_state
+
+    fit_card = create_fit_card(outfit_suggestion, selected_item)
+    session_state["fit_card"] = fit_card
+    session_state["completed_steps"].append("create_fit_card")
+    print(f"fit_card: {fit_card}")
+    print(f"completed_steps: {session_state['completed_steps']}")
+
+    return session_state
 
 
 # ── CLI test ──────────────────────────────────────────────────────────────────

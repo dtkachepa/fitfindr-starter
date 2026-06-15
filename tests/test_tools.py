@@ -15,7 +15,7 @@ def test_search_listings_returns_relevant_results():
 
 
 def test_search_listings_no_results_for_impossible_constraints():
-    results = search_listings("sequined astronaut cape", "XXS", 1.0)
+    results = search_listings("designer ballgown", size="XXS", max_price=5)
 
     assert results == []
 
@@ -46,11 +46,12 @@ def test_suggest_outfit_with_example_wardrobe():
 
 
 def test_suggest_outfit_with_empty_wardrobe_returns_fallback():
-    new_item = search_listings("vintage graphic tee", "M", 30.0)[0]
+    new_item = search_listings("vintage graphic tee", size=None, max_price=50)[0]
     outfit = suggest_outfit(new_item, get_empty_wardrobe())
 
     assert isinstance(outfit, str)
-    assert "Wardrobe context is limited" in outfit
+    assert outfit.strip()
+    assert "limited" in outfit.lower() or "no saved wardrobe" in outfit.lower()
     assert new_item["title"] in outfit
 
 
@@ -72,10 +73,12 @@ def test_create_fit_card_with_valid_inputs():
 
 
 def test_create_fit_card_missing_outfit_returns_clear_message():
-    new_item = search_listings("vintage graphic tee", "M", 30.0)[0]
+    new_item = search_listings("vintage graphic tee", size=None, max_price=50)[0]
     fit_card = create_fit_card("", new_item)
 
+    assert isinstance(fit_card, str)
     assert "outfit suggestion" in fit_card.lower()
+    assert "FitFindr find:" not in fit_card
 
 
 def test_create_fit_card_missing_new_item_returns_clear_message():

@@ -43,8 +43,72 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
            string and return it along with session["outfit_suggestion"] and
            session["fit_card"].
     """
-    # TODO: implement this function
-    return "Agent not yet implemented.", "", ""
+    query = (user_query or "").strip()
+    if not query:
+        return "Enter an item request to search for a listing.", "", ""
+
+    if wardrobe_choice == "Empty wardrobe (new user)":
+        wardrobe = get_empty_wardrobe()
+    else:
+        wardrobe = get_example_wardrobe()
+
+    session = {
+        "user_query": query,
+        "wardrobe": wardrobe,
+        "completed_steps": [],
+    }
+    session = run_agent(session)
+
+    selected_item = session.get("selected_item")
+    if selected_item:
+        listing_text = _format_listing(selected_item)
+    else:
+        listing_text = "No listing was selected."
+
+    if session.get("error") or session.get("error_message"):
+        error = session.get("error_message") or session.get("error")
+        return f"{listing_text}\n\n{error}", "", ""
+
+    return (
+        listing_text,
+        session.get("outfit_suggestion") or "",
+        session.get("fit_card") or "",
+    )
+
+
+def _format_listing(item: dict) -> str:
+    """Format a listing dict for the Gradio output panel."""
+    title = item.get("title", "Untitled listing")
+    platform = item.get("platform", "unknown platform")
+    size = item.get("size", "unknown size")
+    condition = item.get("condition", "unknown condition")
+    price = item.get("price")
+    brand = item.get("brand") or "Unbranded"
+    description = item.get("description", "")
+    colors = ", ".join(item.get("colors") or [])
+    tags = ", ".join(item.get("style_tags") or [])
+
+    if isinstance(price, (int, float)):
+        price_text = f"${price:.2f}"
+    else:
+        price_text = "price unavailable"
+
+    details = [
+        title,
+        f"Platform: {platform}",
+        f"Price: {price_text}",
+        f"Size: {size}",
+        f"Condition: {condition}",
+        f"Brand: {brand}",
+    ]
+    if colors:
+        details.append(f"Colors: {colors}")
+    if tags:
+        details.append(f"Style tags: {tags}")
+    if description:
+        details.append(f"\n{description}")
+
+    return "\n".join(details)
 
 
 # ── interface ─────────────────────────────────────────────────────────────────
