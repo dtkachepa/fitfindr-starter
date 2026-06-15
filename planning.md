@@ -23,12 +23,13 @@ Searches the mock secondhand listings dataset for items that match the user's re
 - `max_price` (float, int, or null): Maximum price the user wants to pay, such as `30.0`, or `null` when the user did not provide a budget.
 
 **What it returns:**
-A dictionary with this structure:
+A list of matching listing dictionaries from `data/listings.json`, sorted by relevance. Each item includes `id`, `title`, `description`, `category`, `style_tags`, `size`, `condition`, `price`, `colors`, `brand`, and `platform`.
 
-- `success` (bool): `true` when one or more listings match; otherwise `false`.
-- `items` (list[dict]): Matching listing dictionaries from `data/listings.json`. Each item includes `id`, `title`, `description`, `category`, `style_tags`, `size`, `condition`, `price`, `colors`, `brand`, and `platform`.
-- `message` (str): User-facing summary of the search result, including what matched or why no match was found.
-- `error` (str or null): `null` on success; an explanation such as `"no_matches"` or `"invalid_description"` on failure.
+Current return type:
+
+```python
+list[dict]
+```
 
 Filtering and matching rules:
 
@@ -37,7 +38,7 @@ Filtering and matching rules:
 - Use `title`, `description`, `category`, `style_tags`, `colors`, and `brand` for text relevance.
 - Rank stronger text matches higher, then prefer items that satisfy size and price cleanly.
 
-Success means the tool returns at least one relevant listing. Failure means no listings match after applying constraints, or the input description is empty/unusable.
+Success means the returned list contains at least one relevant listing. Failure/no-match means the returned list is empty (`[]`) after applying constraints or when the inputs are unusable.
 
 **What happens if it fails or returns nothing:**
 The agent should save the error in session state, tell the user no listings were found, name the likely narrow constraint such as size, description, or price, and stop before calling `suggest_outfit` or `create_fit_card`. The agent can ask the user to loosen constraints, for example by increasing max price or trying a broader description.
@@ -54,14 +55,15 @@ Suggests how to style one selected listing with the user's existing wardrobe. It
 - `wardrobe` (dict): Wardrobe object from `get_example_wardrobe()` or `get_empty_wardrobe()`, with an `items` list.
 
 **What it returns:**
-A dictionary with this structure:
+A string containing the outfit suggestion.
 
-- `success` (bool): `true` when a usable outfit suggestion is produced; otherwise `false`.
-- `outfit` (dict or null): Suggested outfit details, or `null` on hard failure. A successful outfit should include the `new_item`, selected wardrobe pieces when available, and a short styling rationale.
-- `message` (str): User-facing outfit suggestion.
-- `error` (str or null): `null` on success; an explanation such as `"missing_new_item"` on failure.
+Current return type:
 
-Success means the tool creates a usable outfit suggestion using at least the new item and one wardrobe item when possible. If the wardrobe is empty or minimal, success can still be `true` if the tool gives fallback styling advice and clearly says it had limited wardrobe context.
+```python
+str
+```
+
+Success means the returned string is non-empty and gives usable styling guidance. If the wardrobe is empty or minimal, the tool still returns a non-empty fallback advice string that clearly says it has limited wardrobe context. If `new_item` is missing, it returns a clear message string instead of raising an exception.
 
 **What happens if it fails or returns nothing:**
 If `new_item` is missing or unusable, the agent should stop and ask the user to select an item first. If the wardrobe is empty, the agent should use fallback styling advice rather than stopping, then continue to `create_fit_card` only if an outfit suggestion exists.
@@ -74,18 +76,19 @@ If `new_item` is missing or unusable, the agent should stop and ask the user to 
 Creates a short shareable outfit caption from the selected listing and outfit suggestion. The caption should feel like an Instagram outfit post and mention the new item, price or platform when available, and styling vibe.
 
 **Input parameters:**
-- `outfit` (dict or str): The outfit suggestion produced by `suggest_outfit`.
+- `outfit` (str): The outfit suggestion produced by `suggest_outfit`.
 - `new_item` (dict): The selected listing returned by `search_listings`.
 
 **What it returns:**
-A dictionary with this structure:
+A string containing the short shareable caption / fit card.
 
-- `success` (bool): `true` when a caption is produced; otherwise `false`.
-- `fit_card` (str or null): Short shareable caption, or `null` on failure.
-- `message` (str): User-facing final response or explanation.
-- `error` (str or null): `null` on success; an explanation such as `"missing_outfit"` or `"missing_new_item"` on failure.
+Current return type:
 
-Success means the tool produces a caption based on the selected item and outfit suggestion. Failure means `outfit` or `new_item` is missing, empty, or unusable.
+```python
+str
+```
+
+Success means the returned string is a caption based on the selected item and outfit suggestion. If `outfit` or `new_item` is missing, empty, or unusable, the tool returns a clear error message string instead of raising an exception.
 
 **What happens if it fails or returns nothing:**
 The agent should explain that it needs a selected item and outfit suggestion before it can create a fit card. It should not invent missing item details; it should ask the user to pick an item or rerun the outfit step.
@@ -108,13 +111,13 @@ The agent should use session state to decide whether the next tool has the input
 2. Parse or infer `description`, `size`, and `max_price` from the query. If the user does not provide `size`, store `null`; if the user does not provide `max_price`, store `null`.
 3. Load or receive wardrobe context and save it as `wardrobe`. During early testing this can come from `get_example_wardrobe()` or `get_empty_wardrobe()`.
 4. If the user is asking to find a secondhand item, call `search_listings(description, size, max_price)`.
-5. Save the returned `items` as `search_results` and record `"search_listings"` in `completed_steps`.
-6. If `search_listings.success` is `false` or `items` is empty, save `error_message`, tell the user no listings were found, suggest loosening size, description, or price constraints, and stop.
+5. Save the returned list as `search_results` and record `"search_listings"` in `completed_steps`.
+6. If the returned list is empty, save `error_message`, tell the user no listings were found, suggest loosening size, description, or price constraints, and stop.
 7. If listings are found, select the best item by relevance and price match, or use the first ranked result. Save it as `selected_item`.
 8. Only if `selected_item` exists, call `suggest_outfit(selected_item, wardrobe)`.
 9. Save the returned outfit as `outfit_suggestion` and record `"suggest_outfit"` in `completed_steps`.
-10. If `suggest_outfit` fails because `selected_item` is missing, save `error_message`, ask the user to select an item, and stop.
-11. If the wardrobe is empty, allow fallback styling advice if the tool returns a successful outfit suggestion with limited wardrobe context.
+10. If `suggest_outfit` returns an empty or unusable string, save `error_message`, ask the user to select an item, and stop.
+11. If the wardrobe is empty, allow fallback styling advice if the tool returns a non-empty suggestion with limited wardrobe context.
 12. Only if `outfit_suggestion` exists, call `create_fit_card(outfit_suggestion, selected_item)`.
 13. Save the returned caption as `fit_card` and record `"create_fit_card"` in `completed_steps`.
 14. Return a final response containing the selected listing, the outfit suggestion, and the fit card.
@@ -127,7 +130,7 @@ The loop is complete when it has either returned a final response with a selecte
 
 **How does information from one tool get passed to the next?**
 
-The agent should keep a session state dictionary for the current interaction. Each tool reads only the state it needs and writes back structured results for later steps.
+The agent should keep a session state dictionary for the current interaction. Each tool reads only the state it needs and writes back its actual return value for later steps.
 
 | State key | Type | Purpose |
 |-----------|------|---------|
@@ -138,7 +141,7 @@ The agent should keep a session state dictionary for the current interaction. Ea
 | `wardrobe` | dict | User wardrobe object with an `items` list. |
 | `search_results` | list[dict] | Listings returned by `search_listings`. |
 | `selected_item` | dict or null | The listing chosen for styling. |
-| `outfit_suggestion` | dict, str, or null | Output from `suggest_outfit`. |
+| `outfit_suggestion` | str or null | Output from `suggest_outfit`. |
 | `fit_card` | str or null | Caption output from `create_fit_card`. |
 | `error_message` | str or null | Current blocking error or user-facing failure explanation. |
 | `completed_steps` | list[str] | Tool names that completed successfully or intentionally with fallback. |
@@ -161,15 +164,14 @@ For each tool, describe the specific failure mode you're handling and what the a
 
 | Tool or step | Failure mode | Cause | Tool return | Agent response | Stop, retry, or fallback |
 |--------------|--------------|-------|-------------|----------------|--------------------------|
-| search_listings | No results match the query | Description, size, or max price is too narrow for the 40 mock listings. | `success: false`, `items: []`, `message` explaining no matches, `error: "no_matches"` | Tell the user no listings were found and suggest broadening the description, removing size, or increasing max price. | Stop before `suggest_outfit` and `create_fit_card`. |
-| search_listings | User gives no size | Size was not included in the user query. | `success: true` if description/price matches exist, with `size` treated as `null`. | Mention that results were not filtered by size if relevant. | Continue; no retry needed. |
-| search_listings | User gives no max price | Budget was not included in the user query. | `success: true` if description/size matches exist, with `max_price` treated as `null`. | Mention that results were not filtered by price if relevant. | Continue; no retry needed. |
-| search_listings | Inputs are unusable | Description is empty or unrelated to finding an item. | `success: false`, `items: []`, `message` asking for an item description, `error: "invalid_description"` | Ask the user what kind of item they want to find. | Stop until user provides a clearer request. |
-| suggest_outfit | Wardrobe is empty | `wardrobe["items"]` is empty, such as from `get_empty_wardrobe()`. | Prefer `success: true` with fallback outfit advice and `error: null`; if impossible, `success: false`, `outfit: null`, `error: "empty_wardrobe"`. | Say wardrobe context is limited and style the new item with general advice. | Fallback if possible; continue only if an outfit exists. |
-| suggest_outfit | Selected item is missing | `selected_item` was not saved because search failed or no item was chosen. | `success: false`, `outfit: null`, `message` asking for a selected item, `error: "missing_new_item"`. | Ask the user to select a listing first. | Stop. |
-| create_fit_card | Outfit suggestion is missing | `suggest_outfit` failed or was skipped. | `success: false`, `fit_card: null`, `message` explaining an outfit is required, `error: "missing_outfit"`. | Explain that a fit card needs an outfit suggestion first. | Stop. |
-| create_fit_card | New item is missing | Selected listing is missing or malformed. | `success: false`, `fit_card: null`, `message` explaining a selected listing is required, `error: "missing_new_item"`. | Ask the user to choose a listing before creating the caption. | Stop. |
-| LLM/API call | Groq call fails or times out later | Network issue, invalid API key, rate limit, or model timeout. | Structured failure with `success: false`, relevant output field set to `null`, and `error` such as `"llm_timeout"` or `"llm_api_error"`. | Apologize briefly, explain that the generation step failed, and keep prior successful state so the user can retry. | Retry once if safe; otherwise stop with a clear message. |
+| search_listings | No results match the query | Description, size, or max price is too narrow for the 40 mock listings. | `[]` | Tell the user no listings were found and suggest broadening the description, removing size, or increasing max price. | Stop before `suggest_outfit` and `create_fit_card`. |
+| search_listings | User gives no size | Size was not included in the user query. | A `list[dict]` if description/price matches exist, with `size` treated as `None`. | Continue with the returned listings. | Continue; no retry needed. |
+| search_listings | User gives no max price | Budget was not included in the user query. | A `list[dict]` if description/size matches exist, with `max_price` treated as `None`. | Continue with the returned listings. | Continue; no retry needed. |
+| search_listings | Inputs are unusable | Description is empty or unrelated to finding an item. | Usually `[]` after no relevant matches. | Ask the user what kind of item they want to find. | Stop until user provides a clearer request. |
+| suggest_outfit | Wardrobe is empty | `wardrobe["items"]` is empty, such as from `get_empty_wardrobe()`. | A non-empty fallback advice string mentioning limited wardrobe context. | Say wardrobe context is limited and style the new item with general advice. | Fallback and continue if the string is non-empty. |
+| suggest_outfit | Selected item is missing | `selected_item` was not saved because search failed or no item was chosen. | A clear message string such as `I need a selected item before I can suggest an outfit.` | Ask the user to select a listing first. | Stop. |
+| create_fit_card | Outfit suggestion is missing | `suggest_outfit` failed or was skipped. | A clear message string: `I need an outfit suggestion before I can create a fit card.` | Explain that a fit card needs an outfit suggestion first. | Stop. |
+| create_fit_card | New item is missing | Selected listing is missing or malformed. | A clear message string such as `I need a selected item before I can create a fit card.` | Ask the user to choose a listing before creating the caption. | Stop. |
 
 ---
 
@@ -209,9 +211,9 @@ For each implementation milestone, I will use Codex with the specific planning s
 
 **Milestone 3 - Individual tool implementations:**
 
-- For implementing `search_listings`, I will give Codex the Tool 1 specification, listings data fields, and `utils/data_loader.py` helper details. I expect Codex to implement filtering with `load_listings()` and return the documented `success`, `items`, `message`, and `error` structure. I will verify it by testing matching queries, size filtering, price filtering, combined constraints, and no-result behavior.
+- For implementing `search_listings`, I will give Codex the Tool 1 specification, listings data fields, and `utils/data_loader.py` helper details. I expect Codex to implement filtering with `load_listings()` and return a ranked `list[dict]`, with `[]` for no-result behavior. I will verify it by testing matching queries, size filtering, price filtering, combined constraints, and no-result behavior.
 - For implementing `suggest_outfit`, I will give Codex the Tool 2 specification, wardrobe schema, and `selected_item` state contract. I expect Codex to implement category-aware and style-aware outfit selection using wardrobe `category`, `colors`, `style_tags`, and `notes`. I will verify it with `get_example_wardrobe()` and `get_empty_wardrobe()` to confirm both normal and fallback behavior.
-- For implementing `create_fit_card`, I will give Codex the Tool 3 specification and expected caption behavior. I expect Codex to produce short captions that mention the new item, price or platform when available, and the styling vibe. I will verify that different inputs produce different captions and that missing `outfit` or `new_item` inputs return structured failures.
+- For implementing `create_fit_card`, I will give Codex the Tool 3 specification and expected caption behavior. I expect Codex to produce short captions that mention the new item, price or platform when available, and the styling vibe. I will verify that valid inputs return a caption string and that missing `outfit` or `new_item` inputs return clear message strings.
 
 **Milestone 4 - Planning loop and state management:**
 
@@ -270,7 +272,7 @@ create_fit_card(outfit=outfit_suggestion, new_item=selected_item)
 
 **Error path if search returns no matches:**
 
-If `search_listings("vintage graphic tee", "M", 30.0)` returns `success: false` and `items: []`, the agent saves `error_message`, tells the user no matching size M tees were found under `$30`, suggests loosening the size, description, or price constraint, and stops without calling `suggest_outfit` or `create_fit_card`.
+If `search_listings("vintage graphic tee", "M", 30.0)` returns `[]`, the agent saves `error_message`, tells the user no matching size M tees were found under `$30`, suggests loosening the size, description, or price constraint, and stops without calling `suggest_outfit` or `create_fit_card`.
 
 **Final output to user:**
 The user sees one concise response with:
