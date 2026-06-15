@@ -1,0 +1,23 @@
+flowchart TD
+    A[User query] --> B[Planning loop parses description, size, max_price, wardrobe context]
+    B <--> S[(Session state)]
+    B --> C{Is user asking to find an item?}
+    C -- No --> Z[Respond normally or ask for a secondhand item request]
+    C -- Yes --> D["search_listings(description, size, max_price)"]
+    D --> S
+    D --> E{Any matching listings?}
+    E -- No --> F[Save error_message]
+    F --> G[Tell user no listings were found and suggest loosening constraints]
+    G --> H[Stop early]
+    E -- Yes --> I[Select best ranked listing]
+    I --> J[Save selected_item]
+    J --> S
+    J --> K{selected_item exists?}
+    K -- No --> L[Ask user to select an item and stop]
+    K -- Yes --> M["suggest_outfit(selected_item, wardrobe)"]
+    M --> S
+    M --> N{outfit_suggestion exists?}
+    N -- No --> O[Explain outfit could not be created and stop]
+    N -- Yes --> P["create_fit_card(outfit_suggestion, selected_item)"]
+    P --> S
+    P --> Q[Final response: selected listing, outfit suggestion, fit card]
